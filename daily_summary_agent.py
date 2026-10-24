@@ -4,7 +4,7 @@ import subprocess
 import urllib.request
 import json
 from collections import defaultdict
-from datetime import datetime, date
+from datetime import datetime, timedelta, timezone
 
 WORKSPACE_DIR = os.path.expanduser("~/dev")
 NOTES_DIR = os.path.expanduser("~/Documents/DailyLogs")
@@ -23,8 +23,9 @@ def scrub_secrets(text: str) -> str:
     return text
 
 def collect_git_activity(base_path: str) -> str:
-    """Scan repositories for commits authored today."""
-    today = date.today().isoformat()
+    """Scan repos for commits created in the last 24 hours."""
+    # Rolling 24-hour timestamp
+    since_time = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
     repo_activities = []
 
     if not os.path.exists(base_path):
@@ -34,7 +35,7 @@ def collect_git_activity(base_path: str) -> str:
         if ".git" in dirs:
             log_cmd = [
                 "git", "-C", root, "log",
-                f"--since={today} 00:00:00",
+                f"--since={since_time}",
                 "--pretty=format:%h - %s (%an)",
                 "--no-merges"
             ]
@@ -50,13 +51,13 @@ def collect_git_activity(base_path: str) -> str:
 
             dirs.remove(".git")
 
-    return "\n\n".join(repo_activities) if repo_activities else "No git commits recorded today."
+    return "\n\n".join(repo_activities) if repo_activities else "No git commits recorded in last 24h."
 
 def collect_window_activity() -> str:
-    """Fetch active window telemetry from ActivityWatch."""
-    today_iso = date.today().isoformat()
-    start_time = f"{today_iso}T00:00:00Z"
-    end_time = f"{today_iso}T23:59:59Z"
+    """Fetch window activity from the last 24 hours."""
+    now = datetime.now(timezone.utc)
+    start_time = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_time = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     try:
         req = urllib.request.urlopen("http://localhost:5600/api/0/buckets", timeout=3)
