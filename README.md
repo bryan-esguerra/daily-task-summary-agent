@@ -1,10 +1,16 @@
-# Local AI Daily DevOps Agent Setup Guide
+# Daily Task Summary Agent
 
-This guide details how to set up a 100% offline, privacy-preserving AI agent on macOS. The agent monitors your daily Git commits across your workspaces and active applications via ActivityWatch, then automatically generates a structured Markdown daily standup report every day at 8:00 PM.
+A 100% offline, privacy-preserving AI assistant that monitors your git commits and active window telemetry (via ActivityWatch) across a rolling 24-hour window, then synthesizes them into structured Markdown daily standup reports using a local Ollama LLM.
+
+## Features
+- **100% Local & Private**: No data leaves your machine; runs on Ollama with local models (`qwen2.5:7b`).
+- **Telemetry & Git Monitoring**: Aggregates commits across git repositories and application focus time from ActivityWatch.
+- **Secret Scrubbing**: Automatically redacts sensitive patterns such as AWS access keys and bearer tokens before sending prompt context to the model.
+- **Automated Scheduling**: Native macOS `launchd` automation to generate notes daily without third-party daemon tools.
 
 ## Prerequisites
 - macOS (Apple Silicon recommended for local LLM inference)
-- Python 3
+- Python 3 (uses native standard libraries only — zero pip dependencies)
 - [Homebrew](https://brew.sh/) installed
 
 ---
