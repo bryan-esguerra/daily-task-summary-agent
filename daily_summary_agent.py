@@ -1,18 +1,17 @@
-#!/usr/bin/env python3
 import os
 import re
 import subprocess
 import urllib.request
 import json
 from collections import defaultdict
-from datetime import datetime, date
+from datetime import datetime, timedelta, timezone
 
-# Dynamic Paths: Avoids ~/Documents to eliminate TCC permission prompts
-HOME = os.path.expanduser("~")
-WORKSPACE_DIR = os.getenv("DAILY_AGENT_WORKSPACE", os.path.join(HOME, "dev"))
-NOTES_DIR = os.getenv("DAILY_AGENT_NOTES", os.path.join(HOME, "DailyLogs"))
-OLLAMA_URL = os.getenv("DAILY_AGENT_OLLAMA_URL", "http://127.0.0.1:11434/api/generate")
-MODEL_NAME = os.getenv("DAILY_AGENT_MODEL", "qwen2.5:7b")
+# --- CONFIGURATION ---
+# Set this to where your actual Git repositories live:
+WORKSPACE_DIR = os.path.expanduser("~/Documents/Projects")
+NOTES_DIR = os.path.expanduser("~/DailyLogs")
+OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
+MODEL_NAME = "gemma2:9b"  # Upgraded model with strict adherence
 
 APP_BLACKLIST = {
     "Finder", "loginwindow", "Spotify", "1Password", 
@@ -25,38 +24,36 @@ def scrub_secrets(text: str) -> str:
     return text
 
 def collect_git_activity(base_path: str) -> str:
-    today = date.today().isoformat()
+    now = datetime.now()
+    since_time = (now - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
     repo_activities = []
 
     if not os.path.exists(base_path):
-        return f"Workspace path '{base_path}' not found."
+        return "None: Workspace directory does not exist or has no git repos."
 
     for root, dirs, _ in os.walk(base_path):
         if ".git" in dirs:
             log_cmd = [
                 "git", "-C", root, "log",
-                f"--since={today} 00:00:00",
-                "--pretty=format:%h - %s (%an)",
+                f"--since={since_time}",
+                "--pretty=format:%h - %s",
                 "--no-merges"
             ]
             res = subprocess.run(log_cmd, capture_output=True, text=True)
             commits = res.stdout.strip()
 
-            branch_cmd = ["git", "-C", root, "rev-parse", "--abbrev-ref", "HEAD"]
-            branch = subprocess.run(branch_cmd, capture_output=True, text=True).stdout.strip()
-
             if commits:
                 repo_name = os.path.basename(root)
-                repo_activities.append(f"Repo: {repo_name} [Branch: {branch}]\nCommits:\n{commits}")
+                repo_activities.append(f"Repo [{repo_name}]:\n{commits}")
 
             dirs.remove(".git")
 
-    return "\n\n".join(repo_activities) if repo_activities else "No git commits recorded today."
+    return "\n\n".join(repo_activities) if repo_activities else "No git commits made in the last 24 hours."
 
 def collect_window_activity() -> str:
-    today_iso = date.today().isoformat()
-    start_time = f"{today_iso}T00:00:00Z"
-    end_time = f"{today_iso}T23:59:59Z"
+    now = datetime.now(timezone.utc)
+    start_time = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_time = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     try:
         req = urllib.request.urlopen("http://localhost:5600/api/0/buckets", timeout=2)
@@ -64,7 +61,7 @@ def collect_window_activity() -> str:
         window_bucket = next((b for b in buckets if "aw-watcher-window" in b), None)
 
         if not window_bucket:
-            return "ActivityWatch running, but window bucket not found."
+            return "No application telemetry available."
 
         events_url = f"http://localhost:5600/api/0/buckets/{window_bucket}/events?start={start_time}&end={end_time}&limit=1500"
         req = urllib.request.urlopen(events_url, timeout=2)
@@ -78,7 +75,7 @@ def collect_window_activity() -> str:
             title = event.get("data", {}).get("title", "")
             duration = int(event.get("duration", 0))
 
-            if not app or app in APP_BLACKLIST or duration < 45:
+            if not app or app in APP_BLACKLIST or duration < 60:
                 continue
 
             app_durations[app] += duration
@@ -88,15 +85,15 @@ def collect_window_activity() -> str:
         lines = []
         for app, sec in sorted(app_durations.items(), key=lambda x: x[1], reverse=True):
             mins = sec // 60
-            if mins < 2:
+            if mins < 3:
                 continue
             context_samples = "; ".join(list(app_titles[app])[:3])
-            lines.append(f"- **{app}** ({mins} mins): {context_samples}")
+            lines.append(f"- {app} ({mins} mins): {context_samples}")
 
-        return "\n".join(lines) if lines else "No significant app activity recorded."
+        return "\n".join(lines) if lines else "No significant application activity recorded."
 
     except Exception:
-        return "ActivityWatch is not running or unreachable. Skipping window telemetry."
+        return "No application telemetry recorded."
 
 def run():
     today_str = datetime.now().strftime("%Y-%m-%d")
@@ -104,31 +101,39 @@ def run():
     raw_apps = scrub_secrets(collect_window_activity())
 
     prompt = f"""
-You are an executive assistant to a Lead DevOps Engineer.
-Using the engineering activity logs and app usage telemetry below, generate a clean, structured daily work note and standup summary.
+You are an objective auditor generating a daily technical work log.
+Your output must be 100% FACTUAL and directly grounded in the provided logs.
 
-### Git Commits Today:
+RULES TO PREVENT HALLUCINATION:
+1. ONLY include facts, repos, tools, or topics explicitly named in the RAW LOGS below.
+2. NEVER assume, extrapolate, or embellish. (For example: if Google Chrome shows a documentation title, state that they read documentation on that topic. Do NOT state they "optimized application telemetry").
+3. If Git logs show "No git commits", explicitly state "No code commits recorded today".
+4. Do NOT mention internal directory paths or configuration errors as accomplishments.
+5. If a section has no evidence in the logs, write "None recorded".
+
+=== RAW LOGS START ===
+[GIT COMMITS - LAST 24H]:
 {raw_git}
 
-### Active Applications & Window Context Today:
+[APPLICATION AND WINDOW ACTIVITY - LAST 24H]:
 {raw_apps}
+=== RAW LOGS END ===
 
-Strictly output in this Markdown format:
-# Daily DevOps Log - {today_str}
+Respond strictly using this Markdown template:
+# Daily Work Log - {today_str}
 
-## 🚀 Key Accomplishments
-- (Synthesize git commits and major terminal/IDE activities into clear achievements)
+## 🚀 Code Deliverables
+(List commits made and repos touched. If none, write "No commits made today.")
 
-## 🔍 Investigations, Research & Troubleshooting
-- (Identify what docs were read in browser, cluster debugging in terminal/k9s/ArgoCD UI, etc.)
+## 🔍 Topics Researched & Systems Accessed
+(Factual bullet points of tools opened, documentation viewed, or tasks evidenced in window titles. Do not extrapolate.)
 
-## ⏱️ Focus Distribution
-- (Highlight key tools and repositories that took the most active focus today)
+## ⏱️ Active Applications
+(Bulleted list of applications and durations directly from the telemetry.)
 
 ## 📋 Standup Talking Points
-- **Yesterday / Today:**
-- **Next Up:**
-- **Blockers:** None
+- **Yesterday / Today:** (1-2 sentences strictly summarizing the actual logs)
+- **Blockers:** None recorded
 """
 
     payload = {
@@ -148,14 +153,14 @@ Strictly output in this Markdown format:
             data = json.loads(resp.read().decode("utf-8"))
             output = data.get("response", "Error: No response generated.")
     except Exception as e:
-        output = f"Failed to generate summary with Ollama: {str(e)}"
+        output = f"Failed to generate summary: {str(e)}"
 
     os.makedirs(NOTES_DIR, exist_ok=True)
     file_path = os.path.join(NOTES_DIR, f"{today_str}.md")
     with open(file_path, "w") as f:
         f.write(output)
 
-    print(f"[DailyAgent] Log successfully written to: {file_path}")
+    print(f"Report written to: {file_path}")
 
 if __name__ == "__main__":
     run()
