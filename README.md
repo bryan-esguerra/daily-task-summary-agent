@@ -1,14 +1,15 @@
 # Daily Task Summary Agent
 
-A 100% offline, privacy-preserving AI assistant that monitors your daily git commits and active window telemetry (via ActivityWatch), synthesizing them into structured Markdown daily standup reports using a local Ollama LLM.
+A 100% offline, privacy-preserving AI assistant that monitors your daily Git commits across a rolling 24-hour window and active window telemetry (via ActivityWatch), synthesizing them into an objective, factual Markdown daily work log using a local Ollama LLM.
 
 ## Features
-- **100% Local & Private**: No data leaves your machine; runs on Ollama with local models (`qwen2.5:7b`).
-- **Zero Python Dependencies**: Written entirely with Python standard libraries (`urllib`, `subprocess`, `json`, etc.) — no virtual environments or `pip` errors.
-- **TCC & Permission-Safe**: Stores logs in `~/DailyLogs` instead of macOS protected directories (`~/Documents`) to avoid system authorization dialog prompts.
-- **Secret Scrubbing**: Automatically redacts sensitive patterns such as AWS access keys, bearer tokens, passwords, and secrets before prompting the model.
-- **Activity Telemetry**: Captures repo commit history and active work apps from ActivityWatch.
-- **Convenient CLI Shortcut**: Adds a `logday` terminal command to generate your summary and open your notes folder anytime with a single command.
+- **100% Local & Private**: No data leaves your machine; runs locally with Ollama (default: `gemma2:9b`).
+- **Zero Hallucination Guardrails**: Prompt engineered with strict grounding rules to ensure only explicitly recorded commits, tools, and docs appear in your reports.
+- **Rolling 24-Hour Telemetry**: Captures git commits authored within the last 24 hours across repositories, plus active foreground app durations from ActivityWatch.
+- **Zero Python Dependencies**: Written entirely with Python standard libraries (`urllib`, `subprocess`, `json`, `datetime`) — no virtual environments or `pip` errors.
+- **TCC & Permission-Safe**: Stores logs in `~/DailyLogs` instead of macOS protected directories (`~/Documents`) to prevent repetitive system authorization prompts.
+- **Secret Scrubbing**: Automatically masks sensitive patterns such as AWS access keys, bearer tokens, passwords, and secrets prior to model inference.
+- **Convenient CLI Shortcut**: Adds a `logday` terminal command to generate your summary and open your notes folder on demand.
 - **Automated Scheduling**: Native macOS `launchd` automation running daily at 8:00 PM.
 
 ---
@@ -17,9 +18,9 @@ A 100% offline, privacy-preserving AI assistant that monitors your daily git com
 
 ```plaintext
 daily-task-summary-agent/
-├── daily_summary_agent.py   # Agent script with dynamic paths & env var overrides
-├── install.sh               # Automated one-click setup script
-├── uninstall.sh             # Clean teardown script
+├── daily_summary_agent.py   # Agent script with strict grounding & configurable paths
+├── install.sh               # Automated one-click setup script (Ollama, models, launchd, alias)
+├── uninstall.sh             # Clean teardown script (unloads launchd, cleans alias & model)
 └── README.md
 ```
 
@@ -28,7 +29,7 @@ daily-task-summary-agent/
 ## Quickstart (Under 60 Seconds)
 
 ### 1. Prerequisites
-- macOS (Apple Silicon recommended for local LLM inference)
+- macOS (Apple Silicon M-series recommended for local LLM inference)
 - [Homebrew](https://brew.sh/)
 - Python 3
 
@@ -42,7 +43,7 @@ brew install --cask activitywatch
 2. Grant macOS Accessibility permissions (**System Settings > Privacy & Security > Accessibility > ActivityWatch [ON]**).
 3. Set ActivityWatch to open at login (**System Settings > General > Login Items & Extensions**).
 
-> **Note**: If ActivityWatch is not installed or running, the agent will gracefully continue and generate summaries using git commits alone.
+> **Note**: If ActivityWatch is not running, the agent will gracefully skip window telemetry and compile the log from git commits alone.
 
 ### 3. One-Click Automated Setup
 Clone the repository and run `install.sh`:
@@ -54,21 +55,38 @@ chmod +x install.sh uninstall.sh
 ./install.sh
 ```
 
-What `install.sh` does automatically:
-1. Detects your Python 3 environment.
-2. Checks for and installs **Ollama** (via Homebrew if missing) and pulls `qwen2.5:7b`.
-3. Creates safe user directories: `~/.local/share/daily-task-summary-agent` and `~/DailyLogs`.
-4. Copies the agent script into your user binary directory and generates your personalized `launchd` plist without manual path editing.
-5. Loads the `launchd` agent to trigger daily at 8:00 PM.
-6. Configures the `logday` shell alias in `~/.zshrc` (or `~/.bashrc`).
-7. Executes a test run immediately.
+#### What `install.sh` does automatically:
+1. Detects your Python 3 binary.
+2. Checks for and starts **Ollama** (installs via Homebrew if not found).
+3. Pulls the target local model (`gemma2:9b` by default) and cleans up older model artifacts (e.g. `qwen2.5:7b`) to reclaim disk space.
+4. Creates non-restricted user directories: `~/.local/share/daily-task-summary-agent` and `~/DailyLogs`.
+5. Copies the agent script into the local share directory and generates a personalized `launchd` plist injected with your workspace configuration.
+6. Loads the `launchd` service to run automatically every day at 8:00 PM.
+7. Adds a `logday` convenience alias to your shell configuration (`~/.zshrc` or `~/.bashrc`).
+8. Runs an immediate test execution.
+
+---
+
+## Customizing Installation
+
+You can pass environment variables directly to `./install.sh` to customize your setup during installation:
+
+```bash
+# Example: Use a custom repository path and custom model
+DAILY_WORKSPACE="$HOME/dev" DAILY_MODEL="gemma2:9b" ./install.sh
+```
+
+| Variable | Default | Description |
+|---|---|---|
+| `DAILY_MODEL` | `gemma2:9b` | Local Ollama model to pull and configure |
+| `DAILY_WORKSPACE` | `~/Documents/Projects` | Root directory to scan for Git repositories |
 
 ---
 
 ## Usage
 
 ### Run Manually (`logday`)
-Generate your report on demand and immediately open your logs folder:
+Generate your report on demand and immediately open the daily notes folder:
 
 ```bash
 logday
@@ -76,7 +94,7 @@ logday
 
 *(Note: If you just ran `install.sh`, restart your terminal or run `source ~/.zshrc` to activate the alias.)*
 
-You can also run the agent directly with Python:
+You can also run the script directly:
 ```bash
 python3 daily_summary_agent.py
 ```
@@ -89,31 +107,30 @@ open ~/DailyLogs
 
 ---
 
-## Configuration & Environment Variables
+## Script Configuration
 
-`daily_summary_agent.py` works out of the box with sensible defaults, but can be customized with environment variables:
+Inside [daily_summary_agent.py](./daily_summary_agent.py), you can adjust configuration settings at the top of the file or via environment variables:
 
-| Variable | Default | Description |
-|---|---|---|
-| `DAILY_AGENT_WORKSPACE` | `~/dev` | Root directory containing your git repositories |
-| `DAILY_AGENT_NOTES` | `~/DailyLogs` | Directory where daily markdown notes are stored |
-| `DAILY_AGENT_OLLAMA_URL` | `http://127.0.0.1:11434/api/generate` | Local Ollama API endpoint |
-| `DAILY_AGENT_MODEL` | `qwen2.5:7b` | Ollama model name to use for synthesis |
-
-Example override in `~/.zshrc`:
-```bash
-export DAILY_AGENT_WORKSPACE="$HOME/Documents/Projects"
-export DAILY_AGENT_MODEL="qwen2.5:7b"
+```python
+WORKSPACE_DIR = os.getenv("DAILY_AGENT_WORKSPACE", os.path.expanduser("~/Documents/Projects"))
+NOTES_DIR = os.getenv("DAILY_AGENT_NOTES", os.path.expanduser("~/DailyLogs"))
+OLLAMA_URL = os.getenv("DAILY_AGENT_OLLAMA_URL", "http://127.0.0.1:11434/api/generate")
+MODEL_NAME = os.getenv("DAILY_AGENT_MODEL", "gemma2:9b")
 ```
 
 ---
 
 ## Uninstall
 
-To cleanly remove the automated background service and installed binary files:
+To cleanly remove the background service and installed files:
 
 ```bash
 ./uninstall.sh
 ```
 
-Your generated daily logs in `~/DailyLogs/` remain preserved.
+The uninstaller will:
+1. Stop and remove the `launchd` scheduled agent.
+2. Delete the installed script directory from `~/.local/share/daily-task-summary-agent`.
+3. Clean up the `logday` alias from your `~/.zshrc` / `~/.bashrc`.
+4. Prompt whether you want to delete the local Ollama model to free up disk space (~5.5 GB).
+5. **Preserve** your generated logs in `~/DailyLogs/`.
