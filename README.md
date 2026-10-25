@@ -66,7 +66,7 @@ brew install --cask activitywatch
 Clone the repository and run `install.sh`:
 
 ```bash
-git clone https://github.com/<your-username>/daily-task-summary-agent.git
+git clone https://github.com/bryan-esguerra/daily-task-summary-agent.git
 cd daily-task-summary-agent
 chmod +x install.sh uninstall.sh
 ./install.sh
