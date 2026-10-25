@@ -1,147 +1,119 @@
 # Daily Task Summary Agent
 
-A 100% offline, privacy-preserving AI assistant that monitors your git commits and active window telemetry (via ActivityWatch) across a rolling 24-hour window, then synthesizes them into structured Markdown daily standup reports using a local Ollama LLM.
+A 100% offline, privacy-preserving AI assistant that monitors your daily git commits and active window telemetry (via ActivityWatch), synthesizing them into structured Markdown daily standup reports using a local Ollama LLM.
 
 ## Features
 - **100% Local & Private**: No data leaves your machine; runs on Ollama with local models (`qwen2.5:7b`).
-- **Telemetry & Git Monitoring**: Aggregates commits across git repositories and application focus time from ActivityWatch.
-- **Secret Scrubbing**: Automatically redacts sensitive patterns such as AWS access keys and bearer tokens before sending prompt context to the model.
-- **Automated Scheduling**: Native macOS `launchd` automation to generate notes daily without third-party daemon tools.
+- **Zero Python Dependencies**: Written entirely with Python standard libraries (`urllib`, `subprocess`, `json`, etc.) — no virtual environments or `pip` errors.
+- **TCC & Permission-Safe**: Stores logs in `~/DailyLogs` instead of macOS protected directories (`~/Documents`) to avoid system authorization dialog prompts.
+- **Secret Scrubbing**: Automatically redacts sensitive patterns such as AWS access keys, bearer tokens, passwords, and secrets before prompting the model.
+- **Activity Telemetry**: Captures repo commit history and active work apps from ActivityWatch.
+- **Convenient CLI Shortcut**: Adds a `logday` terminal command to generate your summary and open your notes folder anytime with a single command.
+- **Automated Scheduling**: Native macOS `launchd` automation running daily at 8:00 PM.
 
-## Prerequisites
+---
+
+## Repository Structure
+
+```plaintext
+daily-task-summary-agent/
+├── daily_summary_agent.py   # Agent script with dynamic paths & env var overrides
+├── install.sh               # Automated one-click setup script
+├── uninstall.sh             # Clean teardown script
+└── README.md
+```
+
+---
+
+## Quickstart (Under 60 Seconds)
+
+### 1. Prerequisites
 - macOS (Apple Silicon recommended for local LLM inference)
-- Python 3 (uses native standard libraries only — zero pip dependencies)
-- [Homebrew](https://brew.sh/) installed
+- [Homebrew](https://brew.sh/)
+- Python 3
 
----
-
-## Step 1: Install Ollama and Download the Model
-
-Ollama runs the AI model entirely locally. We use `qwen2.5:7b` because it is highly optimized for coding context and fits well within a 16GB memory footprint.
-
-1. Open your terminal and install Ollama:
-   ```bash
-   brew install ollama
-   ```
-2. Start the Ollama background service:
-   ```bash
-   brew services start ollama
-   ```
-3. Pull the local model:
-   ```bash
-   ollama pull qwen2.5:7b
-   ```
-
----
-
-## Step 2: Install and Configure ActivityWatch
-
-ActivityWatch is a lightweight, open-source privacy tracker that logs your active window titles locally.
-
-1. Install ActivityWatch via Homebrew:
-   ```bash
-   brew install --cask activitywatch
-   ```
-2. Open **ActivityWatch.app** from your `/Applications` folder.
-3. Grant macOS Accessibility permissions:
-   * Go to **System Settings > Privacy & Security > Accessibility**.
-   * Toggle **ON** permissions for `ActivityWatch`.
-4. Ensure it starts on boot:
-   * Go to **System Settings > General > Login Items & Extensions**.
-   * Add **ActivityWatch** to **Open at Login**.
-
----
-
-## Step 3: Prepare Your Directories
-
-Create the directory for your daily logs:
+### 2. Install & Configure ActivityWatch (Optional but Recommended)
+ActivityWatch is a lightweight, open-source privacy tracker that logs active window titles locally.
 
 ```bash
-mkdir -p ~/Documents/DailyLogs
+brew install --cask activitywatch
 ```
+1. Open **ActivityWatch.app** from `/Applications`.
+2. Grant macOS Accessibility permissions (**System Settings > Privacy & Security > Accessibility > ActivityWatch [ON]**).
+3. Set ActivityWatch to open at login (**System Settings > General > Login Items & Extensions**).
 
----
+> **Note**: If ActivityWatch is not installed or running, the agent will gracefully continue and generate summaries using git commits alone.
 
-## Step 4: Configure the Python Agent Script
+### 3. One-Click Automated Setup
+Clone the repository and run `install.sh`:
 
-This project includes [`daily_summary_agent.py`](./daily_summary_agent.py). It uses only native Python libraries to avoid virtual environment dependency issues. It collects your git activity, fetches window telemetry from ActivityWatch, and passes it to Ollama.
-
-Before automating, check or customize the settings at the top of [`daily_summary_agent.py`](./daily_summary_agent.py):
-
-```python
-WORKSPACE_DIR = os.path.expanduser("~/dev")           # Path to your git repos directory
-NOTES_DIR = os.path.expanduser("~/Documents/DailyLogs") # Path to output folder for daily markdown notes
-OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
-MODEL_NAME = "qwen2.5:7b"
-```
-
----
-
-## Step 5: Automate at 8:00 PM Daily (macOS Launchd)
-
-We use macOS's native `launchd` to schedule the script to run automatically at 20:00 (8 PM) every day.
-
-1. Check your current macOS username:
-   ```bash
-   whoami
-   ```
-2. Create your `launchd` plist configuration file:
-   ```bash
-   nano ~/Library/LaunchAgents/com.devops.dailylogs.plist
-   ```
-3. Paste the following configuration (replace `<YOUR_USERNAME>` with the output from `whoami`, or use the absolute path to your cloned repository):
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.devops.dailylogs</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/bin/python3</string>
-        <string>/Users/<YOUR_USERNAME>/Documents/Projects/daily-task-summary-agent/daily_summary_agent.py</string>
-    </array>
-    
-    <!-- Trigger every day at 8:00 PM (20:00) -->
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Hour</key>
-        <integer>20</integer>
-        <key>Minute</key>
-        <integer>0</integer>
-    </dict>
-    
-    <key>StandardOutPath</key>
-    <string>/tmp/daily_logs.log</string>
-    <key>StandardErrorPath</key>
-    <string>/tmp/daily_logs.err</string>
-</dict>
-</plist>
-```
-4. Load the schedule into macOS:
-   ```bash
-   launchctl load ~/Library/LaunchAgents/com.devops.dailylogs.plist
-   ```
-
----
-
-## Troubleshooting & Manual Testing
-
-To run the generator manually at any time to verify it works:
 ```bash
-python3 /path/to/daily-task-summary-agent/daily_summary_agent.py
-# Or directly from the project directory:
+git clone https://github.com/<your-username>/daily-task-summary-agent.git
+cd daily-task-summary-agent
+chmod +x install.sh uninstall.sh
+./install.sh
+```
+
+What `install.sh` does automatically:
+1. Detects your Python 3 environment.
+2. Checks for and installs **Ollama** (via Homebrew if missing) and pulls `qwen2.5:7b`.
+3. Creates safe user directories: `~/.local/share/daily-task-summary-agent` and `~/DailyLogs`.
+4. Copies the agent script into your user binary directory and generates your personalized `launchd` plist without manual path editing.
+5. Loads the `launchd` agent to trigger daily at 8:00 PM.
+6. Configures the `logday` shell alias in `~/.zshrc` (or `~/.bashrc`).
+7. Executes a test run immediately.
+
+---
+
+## Usage
+
+### Run Manually (`logday`)
+Generate your report on demand and immediately open your logs folder:
+
+```bash
+logday
+```
+
+*(Note: If you just ran `install.sh`, restart your terminal or run `source ~/.zshrc` to activate the alias.)*
+
+You can also run the agent directly with Python:
+```bash
 python3 daily_summary_agent.py
 ```
 
-To view your logs:
+### View Daily Logs
+Your markdown logs are saved to `~/DailyLogs/YYYY-MM-DD.md`.
 ```bash
-open ~/Documents/DailyLogs
+open ~/DailyLogs
 ```
 
-To check for any scheduled execution errors, check the temp logs:
+---
+
+## Configuration & Environment Variables
+
+`daily_summary_agent.py` works out of the box with sensible defaults, but can be customized with environment variables:
+
+| Variable | Default | Description |
+|---|---|---|
+| `DAILY_AGENT_WORKSPACE` | `~/dev` | Root directory containing your git repositories |
+| `DAILY_AGENT_NOTES` | `~/DailyLogs` | Directory where daily markdown notes are stored |
+| `DAILY_AGENT_OLLAMA_URL` | `http://127.0.0.1:11434/api/generate` | Local Ollama API endpoint |
+| `DAILY_AGENT_MODEL` | `qwen2.5:7b` | Ollama model name to use for synthesis |
+
+Example override in `~/.zshrc`:
 ```bash
-cat /tmp/daily_logs.err
+export DAILY_AGENT_WORKSPACE="$HOME/Documents/Projects"
+export DAILY_AGENT_MODEL="qwen2.5:7b"
 ```
+
+---
+
+## Uninstall
+
+To cleanly remove the automated background service and installed binary files:
+
+```bash
+./uninstall.sh
+```
+
+Your generated daily logs in `~/DailyLogs/` remain preserved.

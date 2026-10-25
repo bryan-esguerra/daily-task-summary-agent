@@ -1,15 +1,18 @@
+#!/usr/bin/env python3
 import os
 import re
 import subprocess
 import urllib.request
 import json
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, date
 
-WORKSPACE_DIR = os.path.expanduser("~/dev")
-NOTES_DIR = os.path.expanduser("~/Documents/DailyLogs")
-OLLAMA_URL = "http://127.0.0.1:11434/api/generate"
-MODEL_NAME = "qwen2.5:7b"
+# Dynamic Paths: Avoids ~/Documents to eliminate TCC permission prompts
+HOME = os.path.expanduser("~")
+WORKSPACE_DIR = os.getenv("DAILY_AGENT_WORKSPACE", os.path.join(HOME, "dev"))
+NOTES_DIR = os.getenv("DAILY_AGENT_NOTES", os.path.join(HOME, "DailyLogs"))
+OLLAMA_URL = os.getenv("DAILY_AGENT_OLLAMA_URL", "http://127.0.0.1:11434/api/generate")
+MODEL_NAME = os.getenv("DAILY_AGENT_MODEL", "qwen2.5:7b")
 
 APP_BLACKLIST = {
     "Finder", "loginwindow", "Spotify", "1Password", 
@@ -17,25 +20,22 @@ APP_BLACKLIST = {
 }
 
 def scrub_secrets(text: str) -> str:
-    """Mask common AWS keys, tokens, and credentials."""
     text = re.sub(r'AKIA[0-9A-Z]{16}', '[REDACTED_AWS_KEY]', text)
     text = re.sub(r'(bearer|token|password|secret)[\s:=]+["\']?([^"\']{8,})', r'\1: [REDACTED]', text, flags=re.I)
     return text
 
 def collect_git_activity(base_path: str) -> str:
-    """Scan repos for commits created in the last 24 hours."""
-    # Rolling 24-hour timestamp
-    since_time = (datetime.now() - timedelta(hours=24)).strftime("%Y-%m-%d %H:%M:%S")
+    today = date.today().isoformat()
     repo_activities = []
 
     if not os.path.exists(base_path):
-        return "Workspace directory not found."
+        return f"Workspace path '{base_path}' not found."
 
     for root, dirs, _ in os.walk(base_path):
         if ".git" in dirs:
             log_cmd = [
                 "git", "-C", root, "log",
-                f"--since={since_time}",
+                f"--since={today} 00:00:00",
                 "--pretty=format:%h - %s (%an)",
                 "--no-merges"
             ]
@@ -51,16 +51,15 @@ def collect_git_activity(base_path: str) -> str:
 
             dirs.remove(".git")
 
-    return "\n\n".join(repo_activities) if repo_activities else "No git commits recorded in last 24h."
+    return "\n\n".join(repo_activities) if repo_activities else "No git commits recorded today."
 
 def collect_window_activity() -> str:
-    """Fetch window activity from the last 24 hours."""
-    now = datetime.now(timezone.utc)
-    start_time = (now - timedelta(hours=24)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    end_time = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+    today_iso = date.today().isoformat()
+    start_time = f"{today_iso}T00:00:00Z"
+    end_time = f"{today_iso}T23:59:59Z"
 
     try:
-        req = urllib.request.urlopen("http://localhost:5600/api/0/buckets", timeout=3)
+        req = urllib.request.urlopen("http://localhost:5600/api/0/buckets", timeout=2)
         buckets = json.loads(req.read().decode())
         window_bucket = next((b for b in buckets if "aw-watcher-window" in b), None)
 
@@ -68,7 +67,7 @@ def collect_window_activity() -> str:
             return "ActivityWatch running, but window bucket not found."
 
         events_url = f"http://localhost:5600/api/0/buckets/{window_bucket}/events?start={start_time}&end={end_time}&limit=1500"
-        req = urllib.request.urlopen(events_url, timeout=3)
+        req = urllib.request.urlopen(events_url, timeout=2)
         events = json.loads(req.read().decode())
 
         app_durations = defaultdict(int)
@@ -96,8 +95,8 @@ def collect_window_activity() -> str:
 
         return "\n".join(lines) if lines else "No significant app activity recorded."
 
-    except Exception as e:
-        return f"ActivityWatch offline or unreachable: {str(e)}"
+    except Exception:
+        return "ActivityWatch is not running or unreachable. Skipping window telemetry."
 
 def run():
     today_str = datetime.now().strftime("%Y-%m-%d")
@@ -139,7 +138,6 @@ Strictly output in this Markdown format:
         "keep_alive": 0
     }
 
-    print("Generating summary with Ollama via native urllib...")
     try:
         req = urllib.request.Request(
             OLLAMA_URL,
@@ -150,14 +148,14 @@ Strictly output in this Markdown format:
             data = json.loads(resp.read().decode("utf-8"))
             output = data.get("response", "Error: No response generated.")
     except Exception as e:
-        output = f"Failed to generate summary: {str(e)}"
+        output = f"Failed to generate summary with Ollama: {str(e)}"
 
     os.makedirs(NOTES_DIR, exist_ok=True)
     file_path = os.path.join(NOTES_DIR, f"{today_str}.md")
     with open(file_path, "w") as f:
         f.write(output)
 
-    print(f"Summary written to: {file_path}")
+    print(f"[DailyAgent] Log successfully written to: {file_path}")
 
 if __name__ == "__main__":
     run()
