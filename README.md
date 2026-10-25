@@ -1,11 +1,12 @@
 # Daily Task Summary Agent
 
-A 100% offline, privacy-preserving AI assistant that monitors your daily Git commits across a rolling 24-hour window and active window telemetry (via ActivityWatch), synthesizing them into an objective, factual Markdown daily work log using a local Ollama LLM.
+A 100% offline, privacy-preserving AI assistant that monitors your daily Git commits across a rolling 24-hour window (8:00 PM yesterday to 8:00 PM today), scheduled calendar meetings (via `icalBuddy`), Google Meet calls, and active window telemetry (via ActivityWatch), synthesizing them into an objective, factual Markdown daily work log using a local Ollama LLM.
 
 ## Features
 - **100% Local & Private**: No data leaves your machine; runs locally with Ollama (default: `gemma2:9b`).
-- **Zero Hallucination Guardrails**: Prompt engineered with strict grounding rules to ensure only explicitly recorded commits, tools, and docs appear in your reports.
-- **Rolling 24-Hour Telemetry**: Captures git commits authored within the last 24 hours across repositories, plus active foreground app durations from ActivityWatch.
+- **Calendar & Meeting Sync**: Consolidates scheduled calendar events from Apple Calendar / synced Google Calendar via `icalBuddy` and detected Google Meet screen sessions into a cohesive "Meetings & Syncs" section.
+- **Zero Hallucination Guardrails**: Prompt engineered with strict grounding rules to ensure only explicitly recorded commits, meetings, tools, and docs appear in your reports.
+- **Strict 24-Hour Boundary**: Tracks activity strictly from yesterday 8:00 PM to today 8:00 PM to match your daily standup cycle.
 - **Zero Python Dependencies**: Written entirely with Python standard libraries (`urllib`, `subprocess`, `json`, `datetime`) — no virtual environments or `pip` errors.
 - **TCC & Permission-Safe**: Stores logs in `~/DailyLogs` instead of macOS protected directories (`~/Documents`) to prevent repetitive system authorization prompts.
 - **Secret Scrubbing**: Automatically masks sensitive patterns such as AWS access keys, bearer tokens, passwords, and secrets prior to model inference.
@@ -33,8 +34,24 @@ daily-task-summary-agent/
 - [Homebrew](https://brew.sh/)
 - Python 3
 
-### 2. Install & Configure ActivityWatch (Optional but Recommended)
-ActivityWatch is a lightweight, open-source privacy tracker that logs active window titles locally.
+### 2. Optional Telemetry & Calendar Integrations
+
+#### A. Install `icalBuddy` for Scheduled Calendar Meetings (Recommended)
+`icalBuddy` reads local events from macOS Apple Calendar (including synced Google, Outlook, or iCloud calendars).
+
+```bash
+brew install ical-buddy
+```
+
+> **IMPORTANT: Grant Calendar Permissions to your Terminal**  
+> macOS requires explicit permission for terminal applications to access Calendar data:  
+> 1. Go to **System Settings > Privacy & Security > Calendars**.  
+> 2. Ensure your terminal emulator (e.g., **Terminal**, **iTerm2**, **Ghostty**, or **Alacritty**) is toggled **ON**.  
+> 
+> *If `icalBuddy` is not installed or permission is withheld, the agent will skip calendar events gracefully and continue compiling git and telemetry logs.*
+
+#### B. Install ActivityWatch for Window & Google Meet Telemetry
+ActivityWatch is a lightweight, open-source privacy tracker that logs active window titles locally. It is also used to detect active Google Meet call durations.
 
 ```bash
 brew install --cask activitywatch
@@ -43,7 +60,7 @@ brew install --cask activitywatch
 2. Grant macOS Accessibility permissions (**System Settings > Privacy & Security > Accessibility > ActivityWatch [ON]**).
 3. Set ActivityWatch to open at login (**System Settings > General > Login Items & Extensions**).
 
-> **Note**: If ActivityWatch is not running, the agent will gracefully skip window telemetry and compile the log from git commits alone.
+> **Note**: If ActivityWatch is not running, the agent will skip window and Google Meet telemetry, compiling logs from git and calendar events alone.
 
 ### 3. One-Click Automated Setup
 Clone the repository and run `install.sh`:
